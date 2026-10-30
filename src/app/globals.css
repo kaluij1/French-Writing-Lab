@@ -1,26 +1,144 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * French Writing Lab — design tokens
+ * Warm ivory paper, charcoal ink, muted accents. Calm by default.
+ */
+@theme {
+  --color-paper: #f8f5ee;
+  --color-paper-raised: #fcfaf5;
+  --color-paper-sunk: #f1ece2;
+  --color-ink: #24221f;
+  --color-ink-soft: #4a4640;
+  --color-ink-muted: #7a746b;
+  --color-ink-faint: #a8a196;
+  --color-rule: #e4ddd0;
+  --color-rule-strong: #d3cab9;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* Muted accents, one per lens */
+  --color-terracotta: #9c5a3c;
+  --color-terracotta-wash: #f3e3d9;
+  --color-sage: #5f7356;
+  --color-sage-wash: #e5ebdd;
+  --color-slate: #4c5e78;
+  --color-slate-wash: #e1e6ee;
+  --color-ochre: #94742c;
+  --color-ochre-wash: #f1e8cf;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --font-serif: var(--font-newsreader), "Iowan Old Style", Georgia, serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-soft: 0 1px 2px rgb(36 34 31 / 0.04), 0 4px 16px rgb(36 34 31 / 0.04);
+
+  --animate-fade-in: fade-in 220ms ease-out both;
+  --animate-flash: flash 1200ms ease-out;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes flash {
+    0% {
+      box-shadow: 0 0 0 3px var(--color-rule-strong);
+    }
+    100% {
+      box-shadow: 0 0 0 3px transparent;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-paper);
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: #e8dcc6;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink-faint);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium tracking-[0.01em] transition-colors duration-150;
+}
+@utility btn-primary {
+  @apply btn bg-ink text-paper hover:bg-ink-soft disabled:bg-ink-faint;
+}
+@utility btn-quiet {
+  @apply btn border border-rule-strong text-ink-soft hover:border-ink-faint hover:text-ink disabled:opacity-50;
+}
+@utility link-quiet {
+  @apply text-ink-muted underline decoration-rule-strong underline-offset-4 transition-colors hover:text-ink hover:decoration-ink-faint;
+}
+@utility eyebrow {
+  @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-muted;
+}
+@utility field {
+  @apply w-full rounded-md border border-rule bg-paper-raised px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-ink-faint focus:outline-none;
+}
+@utility prose-fr {
+  @apply font-serif text-[1.2rem] leading-[1.85] text-ink;
+}
+
+/* Highlight marks in the analysed draft */
+mark.hl {
+  background: transparent;
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+mark.hl-grammar {
+  background: var(--color-terracotta-wash);
+  box-shadow: inset 0 -1.5px 0 var(--color-terracotta);
+}
+mark.hl-vocabulary {
+  background: var(--color-sage-wash);
+  box-shadow: inset 0 -1.5px 0 var(--color-sage);
+}
+mark.hl-mixing {
+  background: var(--color-slate-wash);
+  box-shadow: inset 0 -1.5px 0 var(--color-slate);
+}
+mark.hl-complexity {
+  background: var(--color-ochre-wash);
+  box-shadow: inset 0 -1.5px 0 var(--color-ochre);
+}
+mark.hl[data-active="true"] {
+  background: #e7dcc8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
