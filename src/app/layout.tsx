@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const aiDemo = !process.env.ANTHROPIC_API_KEY;
+  const aiDemo = !process.env.ANTHROPIC_API_KEY?.trim();
   return (
     <html lang="en" className={`${newsreader.variable} ${inter.variable}`}>
       <body>

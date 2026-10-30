@@ -35,10 +35,11 @@ Open http://localhost:3000. With no environment variables set, the app runs full
 
 The key is only read on the server, in `src/lib/analysis/service.ts` (marked `server-only`), and is never sent to the browser. Details:
 
-- Model: `claude-opus-5-5` by default. Override it with `ANTHROPIC_MODEL`.
+- Model: `claude-haiku-5-5` by default, the lowest-cost option at a fraction of a cent per lens. For deeper feedback, set `ANTHROPIC_MODEL` to `claude-sonnet-5-5` (about 20× the cost) or `claude-opus-5-5` (about 40×).
 - Each lens is one request to `client.beta.messages.parse()` with a Zod schema passed as `output_config.format`. That makes Claude return JSON matching the schema, which is then validated again before the UI sees it.
 - `output_config.effort: "medium"`. Thinking is adaptive (always on for this model).
-- Server-side refusal fallback is on (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). If the model declines a request, the API retries it on Anthropic's recommended fallback model.
+- On models that support it (Sonnet 5.5, Opus 5.5), server-side refusal fallback is on (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). Haiku doesn't support it, so the setting is left out for Haiku.
+- Visit `/api/status` on your deployment to check the configuration. It returns `{"ai": true, "model": "..."}` once the key is picked up, and never shows the key itself.
 - Rate limits, authentication errors, connection failures, refusals, truncation and invalid output each return a clear message, along with a flag saying whether retrying makes sense.
 
 ## Configuring Supabase

@@ -100,13 +100,23 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
     (async () => {
       try {
         const store = getStore();
-        const [d, analyses, v] = await Promise.all([store.getDraft(draftId), store.listAnalyses(draftId), store.listVocab()]);
+        const [d, analyses, v, aiLive] = await Promise.all([
+          store.getDraft(draftId),
+          store.listAnalyses(draftId),
+          store.listVocab(),
+          fetch("/api/status")
+            .then((r) => r.json())
+            .then((s: { ai?: boolean }) => Boolean(s.ai))
+            .catch(() => false),
+        ]);
         setDraft(d);
         setVocab(v);
         if (d?.submitted_text) {
           const next: Partial<Record<Lens, LensState>> = {};
-          // analyses are newest first; keep the latest per lens for the current submission
+          // analyses are newest first; keep the latest per lens for the current submission.
+          // Once Claude is configured, old demo results are ignored so the lens runs for real.
           for (const a of analyses) {
+            if (aiLive && a.demo) continue;
             if (a.source_text === d.submitted_text && !next[a.lens]) next[a.lens] = { status: "done", analysis: a };
           }
           setLenses((prev) => ({ ...prev, ...next }));
@@ -335,6 +345,9 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
                       Demo analysis: produced by a simple built-in rule set because no Claude API key is configured.
                       Add <code className="font-mono">ANTHROPIC_API_KEY</code> for a full reading.
                     </p>
+                  )}
+                  {!activeState.analysis.demo && activeState.analysis.model && (
+                    <p className="mb-6 text-[11px] text-ink-faint">Analysed by {activeState.analysis.model}</p>
                   )}
                   <LensResultView
                     analysis={activeState.analysis}

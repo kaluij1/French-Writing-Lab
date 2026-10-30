@@ -5,7 +5,11 @@ import { buildUserPrompt, SYSTEM_PROMPT } from "./prompts";
 import { LENS_SCHEMAS, type AnalysisResponse, type Lens, type LensResult } from "./schemas";
 import { runDemoAnalysis } from "./demo";
 
-export const ANALYSIS_MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
+// Claude Haiku 5.5 is the low-cost default. Set ANTHROPIC_MODEL=claude-sonnet-5-5 (or claude-opus-5-5) for deeper feedback.
+export const ANALYSIS_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-haiku-5-5";
+
+// Models that accept server-side refusal fallbacks (`fallbacks: "default"`). Haiku does not.
+const SERVER_FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
 
 export class AnalysisError extends Error {
   constructor(
@@ -18,12 +22,12 @@ export class AnalysisError extends Error {
 }
 
 export function isAiConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 }
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
-  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
+  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY?.trim(), maxRetries: 2 });
   return client;
 }
 
@@ -37,13 +41,15 @@ export async function analyzeDraft<L extends Lens>(text: string, lens: L): Promi
   }
 
   const schema = LENS_SCHEMAS[lens];
+  const fallback = SERVER_FALLBACK_MODELS.has(ANALYSIS_MODEL)
+    ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+    : {};
 
   try {
     const response = await getClient().beta.messages.parse({
       model: ANALYSIS_MODEL,
       max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...fallback,
       output_config: {
         effort: "medium",
         format: betaZodOutputFormat(schema),
