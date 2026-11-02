@@ -93,6 +93,10 @@ export function WritingWorkspace() {
             ? { kind: "saved", at: new Date(d.updated_at) }
             : { kind: "empty" },
       );
+      // With Cache Components the page is kept alive (hidden) between visits, so state such as
+      // "Submitting…" from a previous submission must be reset whenever the page is shown again.
+      setSubmitting(false);
+      setSubmitError(null);
       setLoading(false);
     })();
     return () => {

@@ -1,41 +1,57 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
-import type { Lens } from "@/lib/analysis/schemas";
-import { findRanges } from "@/lib/highlight";
+import { Fragment } from "react";
+import type { Lens, Span } from "@/lib/analysis/schemas";
 
+/**
+ * Renders the analysed text with a mark for each located item. Spans come from
+ * `resolveLocations`, which has already validated them against this exact text.
+ * Where two items cover overlapping text, the first keeps the mark.
+ */
 export function HighlightedText({
   text,
-  excerpts,
+  spans,
   lens,
   activeIndex,
+  softIndices,
   onSelect,
 }: {
   text: string;
-  excerpts: string[];
+  spans: (Span | null)[];
   lens: Lens | null;
   activeIndex: number | null;
+  /** items drawn with a lighter mark (optional suggestions rather than errors) */
+  softIndices?: Set<number>;
   onSelect: (index: number) => void;
 }) {
-  const ranges = useMemo(() => (lens ? findRanges(text, excerpts) : []), [text, excerpts, lens]);
+  const marks: (Span & { index: number })[] = [];
+  if (lens) {
+    spans.forEach((s, index) => {
+      if (!s || s.end > text.length || s.start >= s.end) return;
+      if (marks.some((m) => s.start < m.end && m.start < s.end)) return;
+      marks.push({ ...s, index });
+    });
+    marks.sort((a, b) => a.start - b.start);
+  }
 
   const parts: React.ReactNode[] = [];
   let cursor = 0;
-  for (const r of ranges) {
-    if (r.start > cursor) parts.push(<Fragment key={`t${cursor}`}>{text.slice(cursor, r.start)}</Fragment>);
+  for (const m of marks) {
+    if (m.start > cursor) parts.push(<Fragment key={`t${cursor}`}>{text.slice(cursor, m.start)}</Fragment>);
     parts.push(
       <mark
-        key={`m${r.start}`}
-        id={`mark-${r.index}`}
-        className={`hl hl-${lens}`}
-        data-active={activeIndex === r.index}
-        onClick={() => onSelect(r.index)}
+        key={`m${m.start}`}
+        id={`mark-${m.index}`}
+        className={`hl hl-${lens}${softIndices?.has(m.index) ? " hl-soft" : ""}`}
+        data-active={activeIndex === m.index}
+        data-index={m.index}
+        onClick={() => onSelect(m.index)}
         title="Show explanation"
       >
-        {text.slice(r.start, r.end)}
+        {text.slice(m.start, m.end)}
       </mark>,
     );
-    cursor = r.end;
+    cursor = m.end;
   }
   if (cursor < text.length) parts.push(<Fragment key={`t${cursor}`}>{text.slice(cursor)}</Fragment>);
 

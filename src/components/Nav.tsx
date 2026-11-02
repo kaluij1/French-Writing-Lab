@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const LINKS = [
@@ -10,10 +11,20 @@ const LINKS = [
   { href: "/vocabulary", label: "My Vocabulary" },
 ];
 
-export function Nav({ accounts, aiDemo }: { accounts: boolean; aiDemo: boolean }) {
+export function Nav({ accounts }: { accounts: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
-  if (pathname.startsWith("/login")) return null;
+  // Read at runtime: env vars on the server can change without a rebuild.
+  const [status, setStatus] = useState<{ ai: boolean; protection: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, []);
+  const aiDemo = status ? !status.ai : false;
+  const passwordGate = status?.protection === "password";
+  if (pathname.startsWith("/login") || pathname.startsWith("/access")) return null;
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
@@ -21,6 +32,11 @@ export function Nav({ accounts, aiDemo }: { accounts: boolean; aiDemo: boolean }
     await getSupabaseBrowserClient().auth.signOut();
     router.replace("/login");
     router.refresh();
+  }
+
+  async function lock() {
+    await fetch("/api/access", { method: "DELETE" });
+    window.location.replace("/access");
   }
 
   const demoNote = [!accounts && "drafts saved in this browser", aiDemo && "sample analysis"].filter(Boolean).join(" · ");
@@ -55,6 +71,11 @@ export function Nav({ accounts, aiDemo }: { accounts: boolean; aiDemo: boolean }
         {accounts && (
           <button onClick={signOut} className="text-ink-faint transition-colors hover:text-ink">
             Sign out
+          </button>
+        )}
+        {!accounts && passwordGate && (
+          <button onClick={lock} className="text-ink-faint transition-colors hover:text-ink">
+            Lock
           </button>
         )}
       </nav>

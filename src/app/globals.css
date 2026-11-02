@@ -130,6 +130,13 @@ mark.hl-complexity {
   background: var(--color-ochre-wash);
   box-shadow: inset 0 -1.5px 0 var(--color-ochre);
 }
+/* Optional suggestions and unclear passages: a lighter, dotted mark */
+mark.hl.hl-soft {
+  background: transparent;
+  box-shadow: none;
+  text-decoration: underline dotted var(--color-ink-faint);
+  text-underline-offset: 4px;
+}
 mark.hl[data-active="true"] {
   background: #e7dcc8;
 }

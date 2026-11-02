@@ -378,6 +378,7 @@ type Rule = {
   re: RegExp;
   fix: (m: RegExpExecArray) => string;
   category: GrammarIssue["category"];
+  elision?: boolean;
   rule: string;
   explanation: string;
   example: string;
@@ -395,7 +396,8 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}(que|de|je|me|te|se|ne|ce|le|la)\\s+(${VOWEL}\\p{L}*)`, "giu"),
     fix: (m) => `${m[1].slice(0, -1)}'${m[2]}`,
-    category: "elision",
+    category: "grammar",
+    elision: true,
     rule: "Elision",
     explanation:
       "Short words ending in -e or -a (que, de, je, me, ne, le, la, ce…) drop their final vowel and take an apostrophe before a word starting with a vowel sound.",
@@ -404,7 +406,8 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}si\\s+(ils?)${E}`, "giu"),
     fix: (m) => `s'${m[1]}`,
-    category: "elision",
+    category: "grammar",
+    elision: true,
     rule: "Elision of si before il / ils",
     explanation: "Si elides only before il and ils: s'il, s'ils (but si elle, si on).",
     example: "S'il pleut demain, nous resterons à la maison.",
@@ -412,7 +415,7 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}à\\s+(le|les)\\s+`, "giu"),
     fix: (m) => (m[1].toLowerCase() === "le" ? "au " : "aux "),
-    category: "article",
+    category: "article_preposition",
     rule: "Contraction à + le / les",
     explanation: "À combines with le to give au, and with les to give aux. (À la and à l' stay unchanged.)",
     example: "Je vais au marché, puis aux Galeries Lafayette.",
@@ -420,7 +423,7 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}de\\s+(le|les)\\s+`, "giu"),
     fix: (m) => (m[1].toLowerCase() === "le" ? "du " : "des "),
-    category: "article",
+    category: "article_preposition",
     rule: "Contraction de + le / les",
     explanation: "De combines with le to give du, and with les to give des.",
     example: "Je reviens du bureau et je parle des vacances.",
@@ -437,7 +440,7 @@ const GRAMMAR_RULES: Rule[] = [
       };
       return `${map[m[1].toLowerCase()] ?? m[1]} ${m[2]}${m[3]}`;
     },
-    category: "verb_conjugation",
+    category: "conjugation",
     rule: "Passé composé with être",
     explanation:
       "Verbs of movement and change of state (aller, venir, partir, arriver, rester, tomber, naître, mourir…) form the passé composé with être, and the past participle agrees with the subject.",
@@ -446,7 +449,7 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}si\\s+(j'|j’|tu |il |elle |on |nous |vous |ils |elles )(\\p{L}+(?:rais|rait|rions|riez|raient))${E}`, "giu"),
     fix: (m) => `si ${m[1]}[imparfait]`,
-    category: "tense",
+    category: "conjugation",
     rule: "Si + imparfait, conditionnel",
     explanation:
       "After hypothetical si, French uses the imparfait, never the conditional. The conditional goes in the other clause: si j'avais le temps, je voyagerais.",
@@ -455,7 +458,7 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}beaucoup des\\s+`, "giu"),
     fix: () => "beaucoup de ",
-    category: "article",
+    category: "article_preposition",
     rule: "Expressions of quantity + de",
     explanation:
       "After expressions of quantity (beaucoup, peu, trop, assez…), use de alone, without the article, when speaking in general.",
@@ -464,7 +467,7 @@ const GRAMMAR_RULES: Rule[] = [
   {
     re: new RegExp(`${B}plus bon(ne)?s?${E}`, "giu"),
     fix: (m) => (m[1] ? "meilleure" : "meilleur"),
-    category: "agreement",
+    category: "grammar",
     rule: "Irregular comparative: meilleur",
     explanation: "The comparative of bon is meilleur (not plus bon), and it agrees with the noun.",
     example: "Ce gâteau est meilleur que celui d'hier.",
@@ -480,8 +483,8 @@ function demoGrammar(text: string): GrammarResult {
     while ((m = r.re.exec(text))) {
       const original = m[0].trimEnd();
       // skip elision false-positives on English words and on h-less tokens like "le un" in lists
-      if (r.category === "elision" && m[2] && englishRuns.has(m[2].toLowerCase())) continue;
-      if (r.category === "elision" && m[2] && NO_ELIDE_AFTER.test(m[2])) continue;
+      if (r.elision && m[2] && englishRuns.has(m[2].toLowerCase())) continue;
+      if (r.elision && m[2] && NO_ELIDE_AFTER.test(m[2])) continue;
       let corrected = r.fix(m).trimEnd();
       if (/^[A-ZÀ-Ö]/.test(original)) corrected = corrected.charAt(0).toUpperCase() + corrected.slice(1);
       if (corrected.includes("[imparfait]")) {
@@ -491,10 +494,15 @@ function demoGrammar(text: string): GrammarResult {
       issues.push({
         original,
         corrected,
+        sentence: sentenceContaining(text, original),
+        kind: "error",
         category: r.category,
         explanation: r.explanation,
         rule: r.rule,
         example: r.example,
+        valid_alternatives: [],
+        interpretations: [],
+        confidence: "high",
         at: m.index,
       });
     }
@@ -549,19 +557,6 @@ const SYNONYMS: Record<string, { alts: string[]; english: string; note: string }
 function demoVocabulary(text: string): VocabularyResult {
   const items: VocabularyItem[] = [];
 
-  for (const ins of demoMixing(text).insertions) {
-    items.push({
-      kind: "english_word",
-      original: ins.original,
-      suggestion: ins.french,
-      english: ins.original,
-      translation_type: words(ins.original).length > 1 ? "contextual" : "direct",
-      explanation: ins.explanation,
-      example: ins.example,
-      alternatives: ins.alternatives,
-    });
-  }
-
   const counts = new Map<string, { n: number; first: string }>();
   for (const w of words(text)) {
     const k = w.toLowerCase().replace(APOS, "'");
@@ -576,6 +571,7 @@ function demoVocabulary(text: string): VocabularyResult {
       items.push({
         kind: "repetition",
         original: first,
+        sentence: sentenceContaining(text, first),
         suggestion: syn.alts[0],
         english: syn.english,
         translation_type: "contextual",
@@ -587,6 +583,7 @@ function demoVocabulary(text: string): VocabularyResult {
       items.push({
         kind: "more_precise",
         original: first,
+        sentence: sentenceContaining(text, first),
         suggestion: syn.alts[0],
         english: syn.english,
         translation_type: "contextual",
@@ -599,7 +596,7 @@ function demoVocabulary(text: string): VocabularyResult {
 
   return {
     summary:
-      `The demo found ${items.length} vocabulary point${items.length === 1 ? "" : "s"}: English gaps, repeated words and a few vague words. ` +
+      `The demo found ${items.length} vocabulary point${items.length === 1 ? "" : "s"}: repeated words and a few vague words. ` +
       "Connect Claude for context-aware word choice, false friends and register.",
     items,
   };

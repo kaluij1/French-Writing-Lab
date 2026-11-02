@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LENS_LABELS, LENSES, type AnalysisResponse, type Lens } from "@/lib/analysis/schemas";
+import { resolveLocations, targetsFor } from "@/lib/locate";
 import { getStore, type Draft, type DraftAnalysis, type VocabItem } from "@/lib/store";
 import { HighlightedText } from "./HighlightedText";
 import { ComplexityView, GrammarView, MixingView, VocabularyView, type SaveVocabInput } from "./LensViews";
@@ -14,6 +15,13 @@ type LensState =
   | { status: "error"; message: string; retryable: boolean }
   | { status: "done"; analysis: DraftAnalysis };
 
+const ALL_IDLE: Record<Lens, LensState> = {
+  grammar: { status: "idle" },
+  vocabulary: { status: "idle" },
+  mixing: { status: "idle" },
+  complexity: { status: "idle" },
+};
+
 const LENS_DOT: Record<Lens, string> = {
   grammar: "bg-terracotta",
   vocabulary: "bg-sage",
@@ -21,22 +29,8 @@ const LENS_DOT: Record<Lens, string> = {
   complexity: "bg-ochre",
 };
 
-function excerptsFor(a: DraftAnalysis | null): string[] {
-  if (!a) return [];
-  switch (a.lens) {
-    case "grammar":
-      return (a as DraftAnalysis<"grammar">).result.issues.map((x) => x.original);
-    case "vocabulary":
-      return (a as DraftAnalysis<"vocabulary">).result.items.map((x) => x.original);
-    case "mixing":
-      return (a as DraftAnalysis<"mixing">).result.insertions.map((x) => x.original);
-    case "complexity":
-      return (a as DraftAnalysis<"complexity">).result.opportunities.map((x) => x.original_sentence);
-  }
-}
-
 function countFor(a: DraftAnalysis): number {
-  return excerptsFor(a).length;
+  return targetsFor(a.lens, a.result).length;
 }
 
 export function AnalysisWorkspace({ draftId }: { draftId: string }) {
@@ -59,9 +53,14 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
   const [vocab, setVocab] = useState<VocabItem[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Lenses with a request in flight. A ref (not state) so that two clicks in the same
+  // tick cannot both see "idle" and send two paid requests.
+  const inFlight = useRef(new Set<Lens>());
+
   // ---------- run a lens ----------
   const runLens = useCallback(async (d: Draft, lens: Lens) => {
-    if (!d.submitted_text) return;
+    if (!d.submitted_text || inFlight.current.has(lens)) return;
+    inFlight.current.add(lens);
     const text = d.submitted_text;
     setLenses((s) => ({ ...s, [lens]: { status: "loading" } }));
     try {
@@ -74,6 +73,12 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
       if (!res.ok || !body) {
         throw Object.assign(new Error(body?.error ?? "The analysis failed. Please try again."), {
           retryable: body?.retryable ?? true,
+        });
+      }
+      // Never store or render a response that isn't an analysis of this lens.
+      if (body.lens !== lens || !body.result || typeof body.result !== "object") {
+        throw Object.assign(new Error("The analysis came back in an unexpected format. Please try again."), {
+          retryable: true,
         });
       }
       const data = body as AnalysisResponse;
@@ -92,6 +97,8 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
         ...s,
         [lens]: { status: "error", message: err.message || "The analysis failed.", retryable: err.retryable ?? true },
       }));
+    } finally {
+      inFlight.current.delete(lens);
     }
   }, []);
 
@@ -119,7 +126,11 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
             if (aiLive && a.demo) continue;
             if (a.source_text === d.submitted_text && !next[a.lens]) next[a.lens] = { status: "done", analysis: a };
           }
-          setLenses((prev) => ({ ...prev, ...next }));
+          // Replace, never merge: this page is kept alive between visits (Cache Components), and
+          // results for an earlier submission must not survive a re-submission.
+          setLenses({ ...ALL_IDLE, ...next });
+          setActiveItem(null);
+          setShowOriginal(false);
           // A lens named in the URL (e.g. after refresh) runs only if it has no saved result.
           if (urlLens && !next[urlLens]) void runLens(d, urlLens);
         }
@@ -168,8 +179,19 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
 
   // ---------- highlight <-> card linking ----------
   const activeState = active ? lenses[active] : null;
-  const activeAnalysis = activeState?.status === "done" ? activeState.analysis : null;
-  const excerpts = useMemo(() => excerptsFor(activeAnalysis), [activeAnalysis]);
+  const doneAnalysis = activeState?.status === "done" ? activeState.analysis : null;
+  // Only show an analysis of the exact text on screen (guards against any stale state).
+  const activeAnalysis = doneAnalysis && doneAnalysis.source_text === draft?.submitted_text ? doneAnalysis : null;
+  const spans = useMemo(
+    () => (activeAnalysis ? resolveLocations(activeAnalysis.source_text, activeAnalysis.lens, activeAnalysis.result) : []),
+    [activeAnalysis],
+  );
+  const isLocated = useCallback((i: number) => spans[i] != null, [spans]);
+  const softIndices = useMemo(() => {
+    if (activeAnalysis?.lens !== "grammar") return undefined;
+    const issues = (activeAnalysis as DraftAnalysis<"grammar">).result.issues;
+    return new Set(issues.flatMap((it, i) => (it.kind === "style" || it.kind === "ambiguous" ? [i] : [])));
+  }, [activeAnalysis]);
 
   function onMarkSelect(index: number) {
     setActiveItem(index);
@@ -248,12 +270,13 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
           </div>
           <HighlightedText
             text={displayed}
-            excerpts={showOriginal ? [] : excerpts}
+            spans={showOriginal ? [] : spans}
             lens={showOriginal ? null : active}
             activeIndex={activeItem}
+            softIndices={softIndices}
             onSelect={onMarkSelect}
           />
-          {activeAnalysis && excerpts.length > 0 && !showOriginal && (
+          {activeAnalysis && spans.some(Boolean) && !showOriginal && (
             <p className="mt-6 text-xs text-ink-faint">Click a highlighted passage to see its explanation.</p>
           )}
         </div>
@@ -355,6 +378,7 @@ export function AnalysisWorkspace({ draftId }: { draftId: string }) {
                     draftId={draft.id}
                     activeIndex={activeItem}
                     setActive={setActiveItem}
+                    isLocated={isLocated}
                     isSaved={isSaved}
                     onSave={onSave}
                   />
@@ -391,6 +415,7 @@ function LensResultView({
   draftId: string;
   activeIndex: number | null;
   setActive: (i: number | null) => void;
+  isLocated: (i: number) => boolean;
   isSaved: (f: string) => boolean;
   onSave: (i: SaveVocabInput) => Promise<void>;
 }) {
@@ -402,7 +427,14 @@ function LensResultView({
     case "mixing":
       return <MixingView result={(analysis as DraftAnalysis<"mixing">).result} {...rest} />;
     case "complexity":
-      return <ComplexityView result={(analysis as DraftAnalysis<"complexity">).result} draftId={draftId} {...rest} />;
+      return (
+        <ComplexityView
+          result={(analysis as DraftAnalysis<"complexity">).result}
+          draftId={draftId}
+          analysisId={analysis.id}
+          {...rest}
+        />
+      );
   }
 }
 

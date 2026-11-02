@@ -22,6 +22,8 @@ export type SaveVocabInput = {
 export type ItemProps = {
   activeIndex: number | null;
   setActive: (i: number | null) => void;
+  /** false when the item's passage could not be matched in the text (so it has no highlight) */
+  isLocated: (i: number) => boolean;
 };
 
 export type VocabProps = {
@@ -35,6 +37,7 @@ function Card({
   index,
   activeIndex,
   setActive,
+  isLocated,
   children,
 }: ItemProps & { index: number; children: React.ReactNode }) {
   const active = activeIndex === index;
@@ -48,6 +51,11 @@ function Card({
       }`}
     >
       {children}
+      {!isLocated(index) && (
+        <p className="mt-4 text-[11px] text-ink-faint">
+          This passage couldn’t be matched exactly in your text, so it isn’t highlighted.
+        </p>
+      )}
     </article>
   );
 }
@@ -120,56 +128,125 @@ const firstOption = (s: string) => s.split(/\s+\/\s+/)[0].trim();
 // ---------- Grammar ----------
 
 const CATEGORY_LABEL: Record<string, string> = {
-  verb_conjugation: "Verb conjugation",
-  tense: "Tense",
+  grammar: "Grammar",
   agreement: "Agreement",
+  conjugation: "Conjugation",
+  word_order: "Word order",
+  article_preposition: "Article / preposition",
+  spelling_accent: "Spelling / accent",
+  punctuation: "Punctuation",
+  style: "Style",
+  // categories used by analyses saved before the current classification
+  verb_conjugation: "Conjugation",
+  tense: "Tense",
   article: "Article",
   preposition: "Preposition",
   pronoun_placement: "Pronoun placement",
   sentence_construction: "Sentence construction",
-  word_order: "Word order",
   elision: "Elision",
   other: "Other",
 };
 
+type GrammarKind = "error" | "ambiguous" | "style";
+
+const GRAMMAR_SECTIONS: { kind: GrammarKind; heading: string; note?: string }[] = [
+  { kind: "error", heading: "Errors" },
+  { kind: "ambiguous", heading: "Unclear passages", note: "The intended meaning isn’t certain. Check which reading you meant." },
+  { kind: "style", heading: "Optional style suggestions", note: "Your French is correct here; these are alternatives, not corrections." },
+];
+
 export function GrammarView({ result, ...p }: { result: GrammarResult } & ItemProps) {
+  // Older stored analyses have no `kind`; they only ever contained errors.
+  const kindOf = (k: string | undefined): GrammarKind => (k === "ambiguous" || k === "style" ? k : "error");
+  const indexed = result.issues.map((it, i) => ({ it, i, kind: kindOf(it.kind) }));
+  const errorCount = indexed.filter((x) => x.kind === "error").length;
+
   return (
     <div>
       <Summary>{result.summary}</Summary>
-      {result.issues.length === 0 ? (
-        <Empty>No grammatical errors found. Stylistic suggestions live in the other lenses.</Empty>
-      ) : (
-        <div className="space-y-4">
-          {result.issues.map((it, i) => (
-            <Card key={i} index={i} {...p}>
-              <Chip tone="accent">{CATEGORY_LABEL[it.category] ?? it.category}</Chip>
-              <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-serif text-lg">
-                <span className="text-ink-muted line-through decoration-terracotta/70 decoration-1">{it.original}</span>
-                <span className="text-ink-faint" aria-hidden>
-                  →
-                </span>
-                <span className="text-ink">{it.corrected}</span>
-              </div>
-              <Field label="Why">{it.explanation}</Field>
-              <Field label="Rule · example">
-                <span className="mr-2 text-ink-soft">{it.rule}.</span>
-                <FrenchExample>{it.example}</FrenchExample>
-              </Field>
-            </Card>
-          ))}
-        </div>
-      )}
+      {errorCount === 0 && <Empty>No grammatical errors found.</Empty>}
+      {GRAMMAR_SECTIONS.map(({ kind, heading, note }) => {
+        const entries = indexed.filter((x) => x.kind === kind);
+        if (!entries.length) return null;
+        return (
+          <section key={kind} className="mb-10 mt-2">
+            <h3 className="eyebrow mb-1">{heading}</h3>
+            {note && <p className="mb-4 text-xs text-ink-muted">{note}</p>}
+            <div className={`space-y-4 ${note ? "" : "mt-3"}`}>
+              {entries.map(({ it, i }) => (
+                <Card key={i} index={i} {...p}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Chip tone="accent">{CATEGORY_LABEL[it.category] ?? it.category}</Chip>
+                    {it.confidence && (
+                      <span
+                        className="text-[11px] text-ink-faint"
+                        title="The model’s own estimate of how sure it is. Not a measured probability."
+                      >
+                        {it.confidence} confidence
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-serif text-lg">
+                    <span
+                      className={
+                        kind === "error"
+                          ? "text-ink-muted line-through decoration-terracotta/70 decoration-1"
+                          : "text-ink-muted"
+                      }
+                    >
+                      {it.original}
+                    </span>
+                    <span className="text-ink-faint" aria-hidden>
+                      →
+                    </span>
+                    <span className="text-ink">{it.corrected}</span>
+                    {kind === "ambiguous" && <span className="font-sans text-xs text-ink-muted">(most likely)</span>}
+                  </div>
+                  {it.sentence && it.sentence.trim() !== it.original.trim() && (
+                    <Field label="In your sentence">
+                      <p className="font-serif text-base text-ink-muted">{it.sentence}</p>
+                    </Field>
+                  )}
+                  {kind === "ambiguous" && it.interpretations && it.interpretations.length > 0 && (
+                    <Field label="Possible meanings">
+                      <ul className="list-disc space-y-1 pl-5 font-serif text-base text-ink">
+                        {it.interpretations.map((m) => (
+                          <li key={m}>{m}</li>
+                        ))}
+                      </ul>
+                    </Field>
+                  )}
+                  <Field label="Why">{it.explanation}</Field>
+                  <Field label="Rule · example">
+                    <span className="mr-2 text-ink-soft">{it.rule}.</span>
+                    <FrenchExample>{it.example}</FrenchExample>
+                  </Field>
+                  {it.valid_alternatives && it.valid_alternatives.length > 0 && (
+                    <Field label="Also correct">
+                      <span className="font-serif text-base text-ink">{it.valid_alternatives.join(" · ")}</span>
+                    </Field>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
 
 // ---------- Vocabulary ----------
 
-const KIND_HEADINGS: Record<VocabularyItem["kind"], string> = {
-  english_word: "Words you wrote in English",
-  incorrect_choice: "Word choice",
-  repetition: "Repetition",
-  more_precise: "More precise expressions",
+// `english_word` only appears in analyses saved before Language Mixing took over English words.
+type VocabKind = VocabularyItem["kind"] | "english_word";
+
+const KIND_HEADINGS: Record<VocabKind, { heading: string; note?: string }> = {
+  incorrect_choice: { heading: "Words that don’t fit here" },
+  more_precise: { heading: "More precise words" },
+  repetition: { heading: "Repetition" },
+  enrichment: { heading: "Ways to enrich", note: "Your word is correct; these are richer options to know." },
+  english_word: { heading: "Words you wrote in English" },
 };
 
 export function VocabularyView({
@@ -184,20 +261,22 @@ export function VocabularyView({
         <Empty>No vocabulary suggestions for this draft.</Empty>
       </div>
     );
-  const order: VocabularyItem["kind"][] = ["english_word", "incorrect_choice", "more_precise", "repetition"];
+  const order: VocabKind[] = ["incorrect_choice", "more_precise", "repetition", "enrichment", "english_word"];
   const sentences = splitSentences(text);
   return (
     <div>
       <Summary>{result.summary}</Summary>
       {order.map((kind) => {
-        const entries = result.items.map((it, i) => ({ it, i })).filter((x) => x.it.kind === kind);
+        const entries = result.items.map((it, i) => ({ it, i })).filter((x) => (x.it.kind as VocabKind) === kind);
         if (!entries.length) return null;
+        const { heading, note } = KIND_HEADINGS[kind];
         return (
           <section key={kind} className="mb-10">
-            <h3 className="eyebrow mb-4">{KIND_HEADINGS[kind]}</h3>
+            <h3 className={`eyebrow ${note ? "mb-1" : "mb-4"}`}>{heading}</h3>
+            {note && <p className="mb-4 text-xs text-ink-muted">{note}</p>}
             <div className="space-y-4">
               {entries.map(({ it, i }) => {
-                const sentence = sentences.find((s) => s.includes(it.original)) ?? "";
+                const sentence = it.sentence || (sentences.find((s) => s.includes(it.original)) ?? "");
                 return (
                   <Card key={i} index={i} {...p}>
                     <div className="flex items-start justify-between gap-4">
@@ -301,7 +380,12 @@ export function MixingView({ result, ...p }: { result: MixingResult } & ItemProp
 
 // ---------- Complexity ----------
 
-export function ComplexityView({ result, draftId, ...p }: { result: ComplexityResult; draftId: string } & ItemProps) {
+export function ComplexityView({
+  result,
+  draftId,
+  analysisId,
+  ...p
+}: { result: ComplexityResult; draftId: string; analysisId: string } & ItemProps) {
   return (
     <div>
       <Summary>{result.summary}</Summary>
@@ -346,7 +430,11 @@ export function ComplexityView({ result, draftId, ...p }: { result: ComplexityRe
                 ))}
               </div>
               <Field label="How it works">{o.explanation}</Field>
-              <TryIt storageKey={`fwl.tryit.${draftId}.${i}`} prompt={o.try_it} />
+              <TryIt
+                storageKey={`fwl.tryit.${analysisId}.${i}`}
+                legacyKey={`fwl.tryit.${draftId}.${i}`}
+                prompt={o.try_it}
+              />
             </Card>
           ))}
         </div>
@@ -355,11 +443,21 @@ export function ComplexityView({ result, draftId, ...p }: { result: ComplexityRe
   );
 }
 
-function TryIt({ prompt, storageKey }: { prompt: string; storageKey: string }) {
+/**
+ * Attempts are stored per analysis run, so a Re-analyze (which can reorder
+ * opportunities) never shows an old attempt under a different suggestion.
+ * Attempts saved before this change used a per-draft key; they are still shown
+ * (and copied forward) rather than lost.
+ */
+function TryIt({ prompt, storageKey, legacyKey }: { prompt: string; storageKey: string; legacyKey: string }) {
   // Only rendered client-side after the analysis loads, so localStorage is available here.
   const [value, setValue] = useState(() => {
     try {
-      return localStorage.getItem(storageKey) ?? "";
+      const current = localStorage.getItem(storageKey);
+      if (current !== null) return current;
+      const legacy = localStorage.getItem(legacyKey);
+      if (legacy) localStorage.setItem(storageKey, legacy);
+      return legacy ?? "";
     } catch {
       return "";
     }

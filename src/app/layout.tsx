@@ -24,12 +24,11 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const aiDemo = !process.env.ANTHROPIC_API_KEY?.trim();
   return (
     <html lang="en" className={`${newsreader.variable} ${inter.variable}`}>
       <body>
         <Suspense>
-          <Nav accounts={isSupabaseConfigured} aiDemo={aiDemo} />
+          <Nav accounts={isSupabaseConfigured} />
         </Suspense>
         <main className="mx-auto w-full max-w-6xl px-6 pb-24 sm:px-10">{children}</main>
       </body>
